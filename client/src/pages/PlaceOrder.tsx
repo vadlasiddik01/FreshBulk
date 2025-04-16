@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -9,10 +9,12 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Plus } from "lucide-react";
+import { Plus, MapPin } from "lucide-react";
 import OrderItemsTable from "@/components/OrderItemsTable";
 import AddItemModal from "@/components/AddItemModal";
+import AddressSelector from "@/components/AddressSelector";
 import { useOrderCart } from "@/hooks/useOrderCart";
+import { useAddresses } from "@/hooks/useAddresses";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { type OrderItem } from "@shared/schema";
@@ -35,6 +37,24 @@ const PlaceOrder = () => {
   const { toast } = useToast();
   const { items, totalAmount, updateQuantity, removeItem, clearCart } = useOrderCart();
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false);
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [useExistingAddress, setUseExistingAddress] = useState(true);
+  
+  // Custom hook to manage addresses
+  const {
+    addresses,
+    selectedAddress,
+    isLoading: isLoadingAddresses,
+    selectAddress,
+    createAddress,
+    updateAddress,
+    deleteAddress,
+    setAsDefaultAddress,
+    isCreating,
+    isUpdating,
+    isDeleting,
+    isSettingDefault
+  } = useAddresses(customerEmail);
 
   // Initialize form
   const form = useForm<OrderFormValues>({
@@ -49,6 +69,32 @@ const PlaceOrder = () => {
       notes: "",
     },
   });
+  
+  // Handle email change to fetch addresses
+  const watchEmail = form.watch("customerEmail");
+  
+  useEffect(() => {
+    if (watchEmail && watchEmail.includes('@')) {
+      setCustomerEmail(watchEmail);
+    }
+  }, [watchEmail]);
+
+  // Update form when a saved address is selected
+  useEffect(() => {
+    if (selectedAddress && useExistingAddress) {
+      form.setValue("customerName", selectedAddress.customerName);
+      form.setValue("customerEmail", selectedAddress.customerEmail);
+      form.setValue("customerPhone", selectedAddress.customerPhone);
+      form.setValue("deliveryAddress", selectedAddress.addressLine);
+      form.setValue("deliveryCity", selectedAddress.city);
+      form.setValue("deliveryPincode", selectedAddress.pincode);
+    }
+  }, [selectedAddress, form, useExistingAddress]);
+
+  // Handle the address form submission
+  const handleAddressFormSubmit = (data: any) => {
+    createAddress(data);
+  };
 
   // Handle form submission
   const createOrderMutation = useMutation({
@@ -163,49 +209,187 @@ const PlaceOrder = () => {
                 <h2 className="text-xl font-heading font-semibold text-neutral-800 pb-2 border-b border-neutral-200 mb-4 mt-4">Delivery Information</h2>
               </div>
               
-              <div className="md:col-span-2">
-                <FormField
-                  control={form.control}
-                  name="deliveryAddress"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delivery Address*</FormLabel>
-                      <FormControl>
-                        <Textarea placeholder="Enter your delivery address" rows={3} {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+              {customerEmail && (
+                <div className="md:col-span-2 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center space-x-2">
+                      <MapPin className="h-5 w-5 text-primary" />
+                      <h3 className="font-semibold text-lg">Delivery Address</h3>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <Button
+                        type="button"
+                        variant={useExistingAddress ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setUseExistingAddress(true)}
+                      >
+                        Use Saved Address
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={!useExistingAddress ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setUseExistingAddress(false)}
+                      >
+                        Enter New Address
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {useExistingAddress ? (
+                    <div className="border border-neutral-200 rounded-md p-4">
+                      {isLoadingAddresses ? (
+                        <div className="flex justify-center py-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                        </div>
+                      ) : (
+                        <AddressSelector
+                          addresses={addresses}
+                          selectedAddress={selectedAddress}
+                          onSelectAddress={selectAddress}
+                          onCreateAddress={createAddress}
+                          onUpdateAddress={(id, data) => updateAddress({ id, addressData: data })}
+                          onDeleteAddress={deleteAddress}
+                          onSetDefaultAddress={setAsDefaultAddress}
+                          isLoading={isCreating || isUpdating || isDeleting || isSettingDefault}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="md:col-span-2">
+                        <FormField
+                          control={form.control}
+                          name="deliveryAddress"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Delivery Address*</FormLabel>
+                              <FormControl>
+                                <Textarea placeholder="Enter your delivery address" rows={3} {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <FormField
+                          control={form.control}
+                          name="deliveryCity"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>City*</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Enter your city" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        
+                        <FormField
+                          control={form.control}
+                          name="deliveryPincode"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Pincode*</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Enter your pincode" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      
+                      <div className="mt-4">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            const formValues = form.getValues();
+                            const addressData = {
+                              customerName: formValues.customerName,
+                              customerEmail: formValues.customerEmail,
+                              customerPhone: formValues.customerPhone,
+                              addressLine: formValues.deliveryAddress,
+                              city: formValues.deliveryCity,
+                              pincode: formValues.deliveryPincode,
+                              isDefault: addresses.length === 0, // Make default if first address
+                            };
+                            
+                            if (addressData.customerEmail && 
+                                addressData.addressLine && 
+                                addressData.city && 
+                                addressData.pincode) {
+                              createAddress(addressData);
+                              setUseExistingAddress(true);
+                            } else {
+                              toast({
+                                title: "Incomplete Information",
+                                description: "Please fill out all the required address fields to save this address.",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                          className="flex items-center"
+                        >
+                          <Plus className="h-4 w-4 mr-1" /> Save This Address
+                        </Button>
+                      </div>
+                    </>
                   )}
-                />
-              </div>
+                </div>
+              )}
               
-              <FormField
-                control={form.control}
-                name="deliveryCity"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>City*</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter your city" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="deliveryPincode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Pincode*</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter your pincode" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {!customerEmail && (
+                <>
+                  <div className="md:col-span-2">
+                    <FormField
+                      control={form.control}
+                      name="deliveryAddress"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Delivery Address*</FormLabel>
+                          <FormControl>
+                            <Textarea placeholder="Enter your delivery address" rows={3} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  
+                  <FormField
+                    control={form.control}
+                    name="deliveryCity"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>City*</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter your city" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="deliveryPincode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Pincode*</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter your pincode" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
               
               {/* Order Items */}
               <div className="md:col-span-2">
