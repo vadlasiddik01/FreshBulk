@@ -1,7 +1,12 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, orderItemSchema } from "@shared/schema";
+import { 
+  insertProductSchema, 
+  insertOrderSchema, 
+  orderItemSchema,
+  insertAddressSchema
+} from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -161,6 +166,107 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(500).json({ message: "Failed to update order status" });
       }
     }
+  });
+
+  // Address routes
+  app.get("/api/addresses", async (req, res) => {
+    const email = req.query.email as string;
+    
+    if (email) {
+      const addresses = await storage.getAddressesByEmail(email);
+      return res.json(addresses);
+    }
+    
+    const addresses = await storage.getAllAddresses();
+    res.json(addresses);
+  });
+
+  app.get("/api/addresses/:id", async (req, res) => {
+    const addressId = parseInt(req.params.id);
+    
+    if (isNaN(addressId)) {
+      return res.status(400).json({ message: "Invalid address ID" });
+    }
+    
+    const address = await storage.getAddressById(addressId);
+    
+    if (!address) {
+      return res.status(404).json({ message: "Address not found" });
+    }
+    
+    res.json(address);
+  });
+
+  app.post("/api/addresses", async (req, res) => {
+    try {
+      const addressData = insertAddressSchema.parse(req.body);
+      const newAddress = await storage.createAddress(addressData);
+      res.status(201).json(newAddress);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid address data", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to create address" });
+      }
+    }
+  });
+
+  app.put("/api/addresses/:id", async (req, res) => {
+    try {
+      const addressId = parseInt(req.params.id);
+      
+      if (isNaN(addressId)) {
+        return res.status(400).json({ message: "Invalid address ID" });
+      }
+      
+      const addressData = insertAddressSchema.partial().parse(req.body);
+      const updatedAddress = await storage.updateAddress(addressId, addressData);
+      
+      if (!updatedAddress) {
+        return res.status(404).json({ message: "Address not found" });
+      }
+      
+      res.json(updatedAddress);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid address data", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to update address" });
+      }
+    }
+  });
+
+  app.delete("/api/addresses/:id", async (req, res) => {
+    const addressId = parseInt(req.params.id);
+    
+    if (isNaN(addressId)) {
+      return res.status(400).json({ message: "Invalid address ID" });
+    }
+    
+    const success = await storage.deleteAddress(addressId);
+    
+    if (!success) {
+      return res.status(404).json({ message: "Address not found" });
+    }
+    
+    res.status(204).end();
+  });
+
+  app.patch("/api/addresses/:id/set-default", async (req, res) => {
+    const addressId = parseInt(req.params.id);
+    
+    if (isNaN(addressId)) {
+      return res.status(400).json({ message: "Invalid address ID" });
+    }
+    
+    const success = await storage.setDefaultAddress(addressId);
+    
+    if (!success) {
+      return res.status(404).json({ message: "Address not found" });
+    }
+    
+    const updatedAddress = await storage.getAddressById(addressId);
+    res.json(updatedAddress);
   });
 
   const httpServer = createServer(app);

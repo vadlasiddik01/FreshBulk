@@ -4,7 +4,9 @@ import {
   Order, 
   InsertOrder, 
   OrderItem, 
-  OrderStatus
+  OrderStatus,
+  Address,
+  InsertAddress
 } from "@shared/schema";
 
 // modify the interface with any CRUD methods
@@ -23,20 +25,33 @@ export interface IStorage {
   getOrderByOrderNumber(orderNumber: string): Promise<Order | undefined>;
   createOrder(order: InsertOrder): Promise<Order>;
   updateOrderStatus(orderId: number, status: string): Promise<Order | undefined>;
+  
+  // Address methods
+  getAllAddresses(): Promise<Address[]>;
+  getAddressById(id: number): Promise<Address | undefined>;
+  getAddressesByEmail(email: string): Promise<Address[]>;
+  createAddress(address: InsertAddress): Promise<Address>;
+  updateAddress(id: number, address: Partial<InsertAddress>): Promise<Address | undefined>;
+  deleteAddress(id: number): Promise<boolean>;
+  setDefaultAddress(id: number): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
   private products: Map<number, Product>;
   private orders: Map<number, Order>;
+  private addresses: Map<number, Address>;
   private currentProductId: number;
   private currentOrderId: number;
+  private currentAddressId: number;
   private orderNumberPrefix: string;
 
   constructor() {
     this.products = new Map();
     this.orders = new Map();
+    this.addresses = new Map();
     this.currentProductId = 1;
     this.currentOrderId = 1;
+    this.currentAddressId = 1;
     this.orderNumberPrefix = "FBO-";
     
     // Initialize with sample products
@@ -157,6 +172,102 @@ export class MemStorage implements IStorage {
     const updatedOrder = { ...order, status };
     this.orders.set(orderId, updatedOrder);
     return updatedOrder;
+  }
+  
+  // Address methods
+  async getAllAddresses(): Promise<Address[]> {
+    return Array.from(this.addresses.values());
+  }
+
+  async getAddressById(id: number): Promise<Address | undefined> {
+    return this.addresses.get(id);
+  }
+
+  async getAddressesByEmail(email: string): Promise<Address[]> {
+    return Array.from(this.addresses.values()).filter(
+      (address) => address.customerEmail.toLowerCase() === email.toLowerCase()
+    );
+  }
+
+  async createAddress(address: InsertAddress): Promise<Address> {
+    const id = this.currentAddressId++;
+    const createdAt = new Date();
+    
+    // If this is the first address or marked as default, ensure it's set as default
+    const isDefault = address.isDefault || this.addresses.size === 0;
+    
+    // If this will be the default, remove default status from other addresses
+    if (isDefault) {
+      Array.from(this.addresses.entries()).forEach(([addressId, existingAddress]) => {
+        if (existingAddress.customerEmail === address.customerEmail) {
+          const updated = { ...existingAddress, isDefault: false };
+          this.addresses.set(addressId, updated);
+        }
+      });
+    }
+
+    const newAddress: Address = {
+      ...address,
+      id,
+      createdAt,
+      isDefault
+    };
+    
+    this.addresses.set(id, newAddress);
+    return newAddress;
+  }
+
+  async updateAddress(id: number, address: Partial<InsertAddress>): Promise<Address | undefined> {
+    const existingAddress = this.addresses.get(id);
+    if (!existingAddress) return undefined;
+
+    // Handle default address logic
+    if (address.isDefault) {
+      Array.from(this.addresses.entries()).forEach(([addressId, addr]) => {
+        if (addressId !== id && addr.customerEmail === existingAddress.customerEmail) {
+          const updated = { ...addr, isDefault: false };
+          this.addresses.set(addressId, updated);
+        }
+      });
+    }
+
+    const updatedAddress = { ...existingAddress, ...address };
+    this.addresses.set(id, updatedAddress);
+    return updatedAddress;
+  }
+
+  async deleteAddress(id: number): Promise<boolean> {
+    const address = this.addresses.get(id);
+    if (!address) return false;
+    
+    // If deleting a default address, set the next available one as default
+    if (address.isDefault) {
+      const otherAddresses = Array.from(this.addresses.values()).filter(
+        addr => addr.id !== id && addr.customerEmail === address.customerEmail
+      );
+      
+      if (otherAddresses.length > 0) {
+        const newDefaultId = otherAddresses[0].id;
+        await this.setDefaultAddress(newDefaultId);
+      }
+    }
+    
+    return this.addresses.delete(id);
+  }
+
+  async setDefaultAddress(id: number): Promise<boolean> {
+    const address = this.addresses.get(id);
+    if (!address) return false;
+    
+    // Set all other addresses from this user to non-default
+    Array.from(this.addresses.entries()).forEach(([addressId, addr]) => {
+      if (addr.customerEmail === address.customerEmail) {
+        const updated = { ...addr, isDefault: addressId === id };
+        this.addresses.set(addressId, updated);
+      }
+    });
+    
+    return true;
   }
 }
 

@@ -1,6 +1,27 @@
-import { pgTable, text, serial, numeric, timestamp, json } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, numeric, timestamp, json, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// Address model
+export const addresses = pgTable("addresses", {
+  id: serial("id").primaryKey(),
+  customerName: text("customer_name").notNull(),
+  customerEmail: text("customer_email").notNull(),
+  customerPhone: text("customer_phone").notNull(),
+  addressLine: text("address_line").notNull(),
+  city: text("city").notNull(),
+  pincode: text("pincode").notNull(),
+  isDefault: boolean("is_default").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAddressSchema = createInsertSchema(addresses).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAddress = z.infer<typeof insertAddressSchema>;
+export type Address = typeof addresses.$inferSelect;
 
 // Product model
 export const products = pgTable("products", {
