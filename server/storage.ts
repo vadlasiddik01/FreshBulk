@@ -82,7 +82,9 @@ export class MemStorage implements IStorage {
       // Pre-hashed version of "admin123" using our hash function
       // In a production environment, this would be created dynamically, but for demo purposes
       // we're using a pre-computed hash to ensure the admin user is available with known credentials
-      const hashedPassword = "3b612c75a7b5048a745d9cde75bb2e57c2130b2438e6e185b0b5a8e7c8b582f797df271b3e042043ca00bf7e048e7d51bdebb19e9054659115bb8ce50a57154b.6ef32e84adcd3681201ec71e0b9df446";
+      const hashedPassword = "b9fb18148fce1937bdf71685979e939b6d65dac59f1300e549f73e116a720c59f50d8c111972382644893b222ca0bd9b556fe7af3d1921fd2f6e153c725fe89e.5035b33cacb64ed17674a229e36e245d";
+      
+      console.log("Creating admin user with username: admin");
       
       this.users.set(this.currentUserId, {
         id: this.currentUserId,
@@ -90,7 +92,7 @@ export class MemStorage implements IStorage {
         password: hashedPassword,
         email: "admin@example.com",
         role: "admin",
-        createdAt: new Date().toISOString()
+        createdAt: new Date()
       });
       
       this.currentUserId++;
