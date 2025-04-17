@@ -10,15 +10,19 @@ import ProductCatalog from "@/pages/ProductCatalog";
 import PlaceOrder from "@/pages/PlaceOrder";
 import TrackOrder from "@/pages/TrackOrder";
 import AdminDashboard from "@/pages/AdminDashboard";
+import AuthPage from "@/pages/auth-page";
+import { AuthProvider } from "@/hooks/use-auth";
+import { ProtectedRoute } from "@/lib/protected-route";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/products" component={ProductCatalog} />
-      <Route path="/place-order" component={PlaceOrder} />
+      <Route path="/auth" component={AuthPage} />
       <Route path="/track-order" component={TrackOrder} />
-      <Route path="/admin" component={AdminDashboard} />
+      <ProtectedRoute path="/place-order" component={PlaceOrder} />
+      <ProtectedRoute path="/admin" component={AdminDashboard} adminOnly />
       <Route component={NotFound} />
     </Switch>
   );
@@ -27,14 +31,16 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="flex flex-col min-h-screen bg-[#f9f9f9]">
-        <Navbar />
-        <main className="flex-grow">
-          <Router />
-        </main>
-        <Footer />
-      </div>
-      <Toaster />
+      <AuthProvider>
+        <div className="flex flex-col min-h-screen bg-[#f9f9f9]">
+          <Navbar />
+          <main className="flex-grow">
+            <Router />
+          </main>
+          <Footer />
+        </div>
+        <Toaster />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

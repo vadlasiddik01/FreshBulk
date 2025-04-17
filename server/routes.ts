@@ -194,6 +194,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Order not found" });
       }
       
+      // Send order status update email
+      sendOrderStatusUpdate(updatedOrder, status as OrderStatusType)
+        .then(sent => {
+          if (sent) {
+            console.log(`Order status update email sent to ${updatedOrder.customerEmail} for order ${updatedOrder.orderNumber}`);
+          } else {
+            console.warn(`Failed to send order status update email for order ${updatedOrder.orderNumber}`);
+          }
+        })
+        .catch(error => {
+          console.error(`Error sending order status update email: ${error}`);
+        });
+      
       res.json(updatedOrder);
     } catch (error) {
       if (error instanceof z.ZodError) {
