@@ -16,23 +16,35 @@ const Footer = () => {
             <h4 className="font-heading font-semibold mb-4">Quick Links</h4>
             <ul className="space-y-2">
               <li>
-                <Link href="/products">
-                  <a className="text-neutral-300 hover:text-white transition-colors">Products</a>
+                <Link 
+                  href="/products" 
+                  className="text-neutral-300 hover:text-white transition-colors"
+                >
+                  Products
                 </Link>
               </li>
               <li>
-                <Link href="/place-order">
-                  <a className="text-neutral-300 hover:text-white transition-colors">Place Order</a>
+                <Link 
+                  href="/place-order" 
+                  className="text-neutral-300 hover:text-white transition-colors"
+                >
+                  Place Order
                 </Link>
               </li>
               <li>
-                <Link href="/track-order">
-                  <a className="text-neutral-300 hover:text-white transition-colors">Track Order</a>
+                <Link 
+                  href="/track-order" 
+                  className="text-neutral-300 hover:text-white transition-colors"
+                >
+                  Track Order
                 </Link>
               </li>
               <li>
-                <Link href="/admin">
-                  <a className="text-neutral-300 hover:text-white transition-colors">Admin</a>
+                <Link 
+                  href="/admin" 
+                  className="text-neutral-300 hover:text-white transition-colors"
+                >
+                  Admin
                 </Link>
               </li>
             </ul>

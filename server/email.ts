@@ -1,28 +1,24 @@
-import { MailService } from '@sendgrid/mail';
-import { Order, OrderStatusType } from '@shared/schema';
+import { MailService } from "@sendgrid/mail";
+import { Order, OrderStatusType } from "@shared/schema";
+import { formatOrderNumber, formatPrice } from "../client/src/lib/formatters";
 
-// Initialize SendGrid mail service
-let mailService: MailService | null = null;
+// Initialize the SendGrid mail service
+const mailService = new MailService();
 
-// Check if SendGrid API key is available and initialize the service
 export function initializeEmailService() {
   if (!process.env.SENDGRID_API_KEY) {
-    console.warn("SENDGRID_API_KEY environment variable not set. Email notifications will be disabled.");
-    return false;
+    console.warn("SENDGRID_API_KEY environment variable is not set. Email functionality will be limited.");
+    return;
   }
 
   try {
-    mailService = new MailService();
     mailService.setApiKey(process.env.SENDGRID_API_KEY);
     console.log("Email service initialized successfully");
-    return true;
   } catch (error) {
     console.error("Failed to initialize email service:", error);
-    return false;
   }
 }
 
-// Basic email params interface
 interface EmailParams {
   to: string;
   from: string;
@@ -31,112 +27,178 @@ interface EmailParams {
   html?: string;
 }
 
-// Send email function
 export async function sendEmail(params: EmailParams): Promise<boolean> {
-  if (!mailService) {
-    console.warn("Email service not initialized. Email not sent.");
+  if (!process.env.SENDGRID_API_KEY) {
+    console.warn("Cannot send email: SENDGRID_API_KEY is not set");
     return false;
   }
 
   try {
     await mailService.send({
       to: params.to,
-      from: params.from,
+      from: {
+        email: params.from,
+        name: "FreshBulk Orders",
+      },
       subject: params.subject,
       text: params.text,
       html: params.html,
     });
-    console.log(`Email sent to ${params.to}`);
     return true;
   } catch (error) {
-    console.error('SendGrid email error:', error);
+    console.error("Failed to send email:", error);
     return false;
   }
 }
 
-// Function to send order confirmation email
 export async function sendOrderConfirmation(order: Order): Promise<boolean> {
-  const subject = `Order Confirmation - Order #${order.orderNumber}`;
+  const formattedOrderNumber = formatOrderNumber(order.orderNumber);
+  const totalAmount = formatPrice(order.totalAmount);
   
-  // Format items for the email
-  const itemsText = JSON.parse(order.items as string)
-    .map((item: any) => `${item.quantity} x ${item.productName} (${item.unit}) - $${item.total.toFixed(2)}`)
-    .join('\n');
+  // Create a list of ordered items
+  const itemsList = order.items.map(item => 
+    `<li>${item.name}: ${item.quantity} x ${formatPrice(item.price)} = ${formatPrice(item.quantity * item.price)}</li>`
+  ).join("");
   
-  const text = `
-    Dear ${order.customerName},
-
-    Thank you for your order! We've received your order and it's being processed.
-
-    Order Details:
-    Order Number: ${order.orderNumber}
-    Date: ${order.createdAt.toLocaleDateString()}
-    
-    Items:
-    ${itemsText}
-    
-    Total Amount: $${parseFloat(order.totalAmount).toFixed(2)}
-    
-    Delivery Address:
-    ${order.deliveryAddress}
-    ${order.deliveryCity}, ${order.deliveryPincode}
-    
-    We'll notify you when your order has been shipped.
-    
-    Thank you for shopping with us!
-    
-    The Fresh Bulk Orders Team
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #4CAF50;">Order Confirmation - #${formattedOrderNumber}</h2>
+      <p>Hello ${order.customerName},</p>
+      <p>Thank you for your order with FreshBulk. Your order has been received and is being processed.</p>
+      
+      <div style="margin: 20px 0; padding: 15px; border: 1px solid #e1e1e1; border-radius: 5px;">
+        <h3 style="margin-top: 0;">Order Details:</h3>
+        <p><strong>Order Number:</strong> ${formattedOrderNumber}</p>
+        <p><strong>Order Date:</strong> ${new Date(order.createdAt).toLocaleDateString()}</p>
+        <p><strong>Status:</strong> ${order.status}</p>
+        <p><strong>Total Amount:</strong> ${totalAmount}</p>
+        
+        <h4 style="margin-bottom: 5px;">Ordered Items:</h4>
+        <ul style="padding-left: 20px;">
+          ${itemsList}
+        </ul>
+        
+        <h4 style="margin-bottom: 5px;">Delivery Address:</h4>
+        <p style="margin: 0;">
+          ${order.shippingAddress.street}<br>
+          ${order.shippingAddress.city}, ${order.shippingAddress.state} ${order.shippingAddress.postalCode}<br>
+          ${order.shippingAddress.country}
+        </p>
+      </div>
+      
+      <p>You can track your order status by using the order tracking feature on our website with your order number: <strong>${formattedOrderNumber}</strong></p>
+      
+      <p>If you have any questions or need assistance, please contact our customer support team at support@freshbulk.com or call us at +91 1234567890.</p>
+      
+      <p>Thank you for choosing FreshBulk!</p>
+      
+      <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e1e1e1; text-align: center; color: #777; font-size: 12px;">
+        <p>This is an automated email. Please do not reply to this message.</p>
+        <p>&copy; ${new Date().getFullYear()} FreshBulk. All rights reserved.</p>
+      </div>
+    </div>
   `;
-
+  
+  const textContent = `
+    Order Confirmation - #${formattedOrderNumber}
+    
+    Hello ${order.customerName},
+    
+    Thank you for your order with FreshBulk. Your order has been received and is being processed.
+    
+    Order Details:
+    Order Number: ${formattedOrderNumber}
+    Order Date: ${new Date(order.createdAt).toLocaleDateString()}
+    Status: ${order.status}
+    Total Amount: ${totalAmount}
+    
+    You can track your order status by using the order tracking feature on our website with your order number: ${formattedOrderNumber}
+    
+    If you have any questions or need assistance, please contact our customer support team at support@freshbulk.com or call us at +91 1234567890.
+    
+    Thank you for choosing FreshBulk!
+  `;
+  
   return sendEmail({
     to: order.customerEmail,
-    from: 'orders@freshbulkorders.com', // Update with your verified sender
-    subject,
-    text,
+    from: "orders@freshbulk.com",
+    subject: `FreshBulk Order Confirmation - #${formattedOrderNumber}`,
+    text: textContent,
+    html: htmlContent,
   });
 }
 
-// Function to send order status update email
 export async function sendOrderStatusUpdate(order: Order, newStatus: OrderStatusType): Promise<boolean> {
-  const subject = `Order Status Update - Order #${order.orderNumber}`;
+  const formattedOrderNumber = formatOrderNumber(order.orderNumber);
   
-  let statusMessage = '';
-  switch(newStatus) {
-    case 'In Progress':
-      statusMessage = "Your order is now being prepared and will be shipped soon.";
+  let statusMessage = "";
+  switch (newStatus) {
+    case "Processing":
+      statusMessage = "Your order is now being processed. We'll update you when it's ready for shipping.";
       break;
-    case 'Delivered':
-      statusMessage = "Your order has been delivered. We hope you enjoy your fresh products!";
+    case "Shipped":
+      statusMessage = "Great news! Your order has been shipped and is on its way to you.";
+      break;
+    case "Delivered":
+      statusMessage = "Your order has been delivered successfully. We hope you enjoy your fresh produce!";
+      break;
+    case "Cancelled":
+      statusMessage = "Your order has been cancelled as requested. If you have any questions, please contact our support team.";
       break;
     default:
-      statusMessage = `Your order status has been updated to: ${newStatus}`;
+      statusMessage = `Your order status has been updated to ${newStatus}.`;
   }
   
-  const text = `
-    Dear ${order.customerName},
-
-    We're writing to inform you that the status of your order #${order.orderNumber} has been updated.
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #4CAF50;">Order Status Update - #${formattedOrderNumber}</h2>
+      <p>Hello ${order.customerName},</p>
+      <p>${statusMessage}</p>
+      
+      <div style="margin: 20px 0; padding: 15px; border: 1px solid #e1e1e1; border-radius: 5px;">
+        <h3 style="margin-top: 0;">Order Details:</h3>
+        <p><strong>Order Number:</strong> ${formattedOrderNumber}</p>
+        <p><strong>Order Date:</strong> ${new Date(order.createdAt).toLocaleDateString()}</p>
+        <p><strong>New Status:</strong> <span style="font-weight: bold; color: #4CAF50;">${newStatus}</span></p>
+      </div>
+      
+      <p>You can track your order status by using the order tracking feature on our website with your order number: <strong>${formattedOrderNumber}</strong></p>
+      
+      <p>If you have any questions or need assistance, please contact our customer support team at support@freshbulk.com or call us at +91 1234567890.</p>
+      
+      <p>Thank you for choosing FreshBulk!</p>
+      
+      <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e1e1e1; text-align: center; color: #777; font-size: 12px;">
+        <p>This is an automated email. Please do not reply to this message.</p>
+        <p>&copy; ${new Date().getFullYear()} FreshBulk. All rights reserved.</p>
+      </div>
+    </div>
+  `;
+  
+  const textContent = `
+    Order Status Update - #${formattedOrderNumber}
     
-    Current Status: ${newStatus}
+    Hello ${order.customerName},
     
     ${statusMessage}
     
     Order Details:
-    Order Number: ${order.orderNumber}
-    Date: ${order.createdAt.toLocaleDateString()}
-    Total Amount: $${parseFloat(order.totalAmount).toFixed(2)}
+    Order Number: ${formattedOrderNumber}
+    Order Date: ${new Date(order.createdAt).toLocaleDateString()}
+    New Status: ${newStatus}
     
-    If you have any questions about your order, please don't hesitate to contact us.
+    You can track your order status by using the order tracking feature on our website with your order number: ${formattedOrderNumber}
     
-    Thank you for shopping with us!
+    If you have any questions or need assistance, please contact our customer support team at support@freshbulk.com or call us at +91 1234567890.
     
-    The Fresh Bulk Orders Team
+    Thank you for choosing FreshBulk!
   `;
-
+  
   return sendEmail({
     to: order.customerEmail,
-    from: 'orders@freshbulkorders.com', // Update with your verified sender
-    subject,
-    text,
+    from: "orders@freshbulk.com",
+    subject: `FreshBulk Order Status Update - #${formattedOrderNumber}`,
+    text: textContent,
+    html: htmlContent,
   });
 }
