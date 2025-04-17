@@ -1,430 +1,759 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Search, Plus, Eye, Edit, Package, BarChart3, Settings } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { 
+  Card, 
+  CardContent, 
+  CardDescription, 
+  CardHeader, 
+  CardTitle 
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import OrderStatusBadge from "@/components/OrderStatusBadge";
-import UpdateOrderStatusModal from "@/components/UpdateOrderStatusModal";
-import AddProductModal from "@/components/AddProductModal";
-import EditProductModal from "@/components/EditProductModal";
-import DeleteProductDialog from "@/components/DeleteProductDialog";
-import { useAdminTabs, type AdminTab } from "@/hooks/useAdminTabs";
-import { formatDate } from "@/lib/formatters";
-import { type Order, type Product } from "@shared/schema";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Order, Product, OrderStatus, OrderStatusType, ProductCategory } from "@shared/schema";
+import { formatOrderNumber, formatPrice, formatDate } from "@/lib/formatters";
+import { 
+  Plus, 
+  PencilIcon, 
+  Trash2Icon,
+  ShoppingBasket, 
+  Package 
+} from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { Redirect } from "wouter";
+import { z } from "zod";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 
-const AdminDashboard = () => {
-  const { activeTab, isTabActive, switchTab } = useAdminTabs('orders');
-  const [orderFilter, setOrderFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  
-  // Selected order/product for modals
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+type AdminTab = 'orders' | 'products';
+
+const productFormSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  category: z.string().min(1, "Please select a category"),
+  price: z.string().refine(val => !isNaN(Number(val)) && Number(val) > 0, "Price must be a positive number"),
+  unit: z.string().min(1, "Please specify a unit (e.g., kg, pieces)"),
+  description: z.string().min(10, "Description must be at least 10 characters"),
+  imageUrl: z.string().url("Please provide a valid image URL")
+});
+
+type ProductFormValues = z.infer<typeof productFormSchema>;
+
+export default function AdminDashboard() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<AdminTab>('orders');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  
-  // Modal states
-  const [showUpdateStatusModal, setShowUpdateStatusModal] = useState(false);
-  const [showAddProductModal, setShowAddProductModal] = useState(false);
-  const [showEditProductModal, setShowEditProductModal] = useState(false);
-  const [showDeleteProductDialog, setShowDeleteProductDialog] = useState(false);
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [isEditProductOpen, setIsEditProductOpen] = useState(false);
+  const [isDeleteProductOpen, setIsDeleteProductOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [isUpdateStatusOpen, setIsUpdateStatusOpen] = useState(false);
+  const { toast } = useToast();
 
-  // Fetch orders
-  const { data: orders = [], isLoading: isLoadingOrders } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
+  // Redirect if user is not an admin
+  if (!user || user.role !== 'admin') {
+    return <Redirect to="/" />;
+  }
+
+  // Query for fetching orders
+  const {
+    data: orders = [],
+    isLoading: isOrdersLoading,
+    error: ordersError,
+  } = useQuery({
+    queryKey: ['/api/orders'],
+    queryFn: async () => {
+      const response = await fetch('/api/orders');
+      if (!response.ok) {
+        throw new Error('Failed to fetch orders');
+      }
+      return response.json();
+    },
   });
 
-  // Fetch products
-  const { data: products = [], isLoading: isLoadingProducts } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
+  // Query for fetching products
+  const {
+    data: products = [],
+    isLoading: isProductsLoading,
+    error: productsError,
+  } = useQuery({
+    queryKey: ['/api/products'],
+    queryFn: async () => {
+      const response = await fetch('/api/products');
+      if (!response.ok) {
+        throw new Error('Failed to fetch products');
+      }
+      return response.json();
+    },
   });
 
-  // Filter orders
-  const filteredOrders = orders.filter(order => {
-    // Filter by status
-    if (orderFilter !== "all" && order.status.toLowerCase().replace(" ", "-") !== orderFilter) {
-      return false;
-    }
-    
-    // Filter by search query
-    if (searchQuery && !(
-      order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customerPhone.toLowerCase().includes(searchQuery.toLowerCase())
-    )) {
-      return false;
-    }
-    
-    return true;
+  // Mutation for updating order status
+  const updateOrderStatusMutation = useMutation({
+    mutationFn: async ({orderId, status}: {orderId: number, status: string}) => {
+      const res = await apiRequest("PATCH", `/api/orders/${orderId}/status`, { status });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/orders'] });
+      setIsUpdateStatusOpen(false);
+      toast({
+        title: "Order status updated",
+        description: "The order status has been successfully updated.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to update order status",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
-  // Handle view order
-  const handleViewOrder = (order: Order) => {
-    window.open(`/track-order?orderNumber=${order.orderNumber}`, '_blank');
+  // Mutation for adding a new product
+  const addProductMutation = useMutation({
+    mutationFn: async (data: ProductFormValues) => {
+      const res = await apiRequest("POST", "/api/products", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      setIsAddProductOpen(false);
+      toast({
+        title: "Product added",
+        description: "The product has been successfully added to the catalog.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to add product",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Mutation for updating a product
+  const updateProductMutation = useMutation({
+    mutationFn: async ({id, data}: {id: number, data: ProductFormValues}) => {
+      const res = await apiRequest("PUT", `/api/products/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      setIsEditProductOpen(false);
+      toast({
+        title: "Product updated",
+        description: "The product has been successfully updated.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to update product",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Mutation for deleting a product
+  const deleteProductMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/products/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      setIsDeleteProductOpen(false);
+      toast({
+        title: "Product deleted",
+        description: "The product has been successfully removed from the catalog.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to delete product",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Form for adding a new product
+  const addProductForm = useForm<ProductFormValues>({
+    resolver: zodResolver(productFormSchema),
+    defaultValues: {
+      name: "",
+      category: "",
+      price: "",
+      unit: "",
+      description: "",
+      imageUrl: "",
+    },
+  });
+
+  // Form for editing a product
+  const editProductForm = useForm<ProductFormValues>({
+    resolver: zodResolver(productFormSchema),
+    defaultValues: {
+      name: "",
+      category: "",
+      price: "",
+      unit: "",
+      description: "",
+      imageUrl: "",
+    },
+  });
+
+  const handleAddProduct = (data: ProductFormValues) => {
+    addProductMutation.mutate(data);
   };
 
-  // Handle update order status
-  const handleUpdateOrderStatus = (order: Order) => {
+  const handleEditProduct = (data: ProductFormValues) => {
+    if (selectedProduct) {
+      updateProductMutation.mutate({
+        id: selectedProduct.id,
+        data,
+      });
+    }
+  };
+
+  const handleDeleteProduct = () => {
+    if (selectedProduct) {
+      deleteProductMutation.mutate(selectedProduct.id);
+    }
+  };
+
+  const handleUpdateOrderStatus = (status: OrderStatusType) => {
+    if (selectedOrder) {
+      updateOrderStatusMutation.mutate({
+        orderId: selectedOrder.id,
+        status,
+      });
+    }
+  };
+
+  const openEditProductModal = (product: Product) => {
+    setSelectedProduct(product);
+    editProductForm.reset({
+      name: product.name,
+      category: product.category,
+      price: product.price,
+      unit: product.unit,
+      description: product.description,
+      imageUrl: product.imageUrl,
+    });
+    setIsEditProductOpen(true);
+  };
+
+  const openDeleteProductModal = (product: Product) => {
+    setSelectedProduct(product);
+    setIsDeleteProductOpen(true);
+  };
+
+  const openUpdateStatusModal = (order: Order) => {
     setSelectedOrder(order);
-    setShowUpdateStatusModal(true);
-  };
-
-  // Handle edit product
-  const handleEditProduct = (product: Product) => {
-    setSelectedProduct(product);
-    setShowEditProductModal(true);
-  };
-
-  // Handle delete product
-  const handleDeleteProduct = (product: Product) => {
-    setSelectedProduct(product);
-    setShowDeleteProductDialog(true);
+    setIsUpdateStatusOpen(true);
   };
 
   return (
-    <section className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto bg-neutral-100">
-      <div className="mb-8">
-        <h1 className="text-3xl font-heading font-bold text-neutral-800">Admin Dashboard</h1>
-        <p className="text-neutral-600 mt-2">Manage orders, products, and inventory</p>
-      </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Sidebar Navigation */}
-        <Card className="bg-white shadow-md rounded-lg p-4 h-min sticky top-4 lg:col-span-1">
-          <h2 className="font-heading font-semibold text-lg text-neutral-800 mb-4">Dashboard</h2>
-          <nav className="space-y-1">
-            <Button
-              variant={isTabActive("orders") ? "default" : "ghost"}
-              className={`w-full justify-start ${isTabActive("orders") ? "bg-primary text-white" : "text-neutral-700 hover:bg-neutral-100"}`}
-              onClick={() => switchTab("orders")}
-            >
-              <Package className="mr-3 h-5 w-5" />
-              <span>Orders</span>
-            </Button>
-            <Button
-              variant={isTabActive("products") ? "default" : "ghost"}
-              className={`w-full justify-start ${isTabActive("products") ? "bg-primary text-white" : "text-neutral-700 hover:bg-neutral-100"}`}
-              onClick={() => switchTab("products")}
-            >
-              <Package className="mr-3 h-5 w-5" />
-              <span>Products</span>
-            </Button>
-            <Button
-              variant={isTabActive("analytics") ? "default" : "ghost"}
-              className={`w-full justify-start ${isTabActive("analytics") ? "bg-primary text-white" : "text-neutral-700 hover:bg-neutral-100"}`}
-              onClick={() => switchTab("analytics")}
-            >
-              <BarChart3 className="mr-3 h-5 w-5" />
-              <span>Analytics</span>
-            </Button>
-            <Button
-              variant={isTabActive("settings") ? "default" : "ghost"}
-              className={`w-full justify-start ${isTabActive("settings") ? "bg-primary text-white" : "text-neutral-700 hover:bg-neutral-100"}`}
-              onClick={() => switchTab("settings")}
-            >
-              <Settings className="mr-3 h-5 w-5" />
-              <span>Settings</span>
-            </Button>
-          </nav>
-        </Card>
-        
-        {/* Main Content */}
-        <Card className="bg-white shadow-md rounded-lg p-6 overflow-hidden lg:col-span-3">
-          {/* Orders Tab */}
-          {activeTab === "orders" && (
-            <div>
-              {/* Orders Filter */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-between mb-6">
-                <div className="flex gap-2">
-                  <Button
-                    variant={orderFilter === "all" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setOrderFilter("all")}
-                  >
-                    All
+    <div className="container py-10">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl font-bold">Admin Dashboard</CardTitle>
+          <CardDescription>
+            Manage your products and orders from one place
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="orders" onValueChange={(value) => setActiveTab(value as AdminTab)}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="orders" className="flex items-center">
+                <ShoppingBasket className="mr-2 h-4 w-4" />
+                Orders
+              </TabsTrigger>
+              <TabsTrigger value="products" className="flex items-center">
+                <Package className="mr-2 h-4 w-4" />
+                Products
+              </TabsTrigger>
+            </TabsList>
+            
+            {/* Orders Tab */}
+            <TabsContent value="orders">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Orders Management</CardTitle>
+                  <CardDescription>
+                    View and manage customer orders
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isOrdersLoading ? (
+                    <div className="flex justify-center p-4">
+                      <div className="loader">Loading...</div>
+                    </div>
+                  ) : orders.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-muted-foreground">No orders found.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Order #</TableHead>
+                            <TableHead>Customer</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Total</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {orders.map((order: Order) => (
+                            <TableRow key={order.id}>
+                              <TableCell className="font-medium">
+                                {formatOrderNumber(order.orderNumber)}
+                              </TableCell>
+                              <TableCell>{order.customerName}</TableCell>
+                              <TableCell>{formatDate(order.createdAt)}</TableCell>
+                              <TableCell>{formatPrice(order.totalAmount)}</TableCell>
+                              <TableCell>
+                                <div className={`px-2 py-1 rounded-full text-xs font-medium inline-block
+                                  ${order.status === OrderStatus.Pending ? 'bg-yellow-100 text-yellow-800' : ''}
+                                  ${order.status === OrderStatus.Processing ? 'bg-blue-100 text-blue-800' : ''}
+                                  ${order.status === OrderStatus.Shipped ? 'bg-purple-100 text-purple-800' : ''}
+                                  ${order.status === OrderStatus.Delivered ? 'bg-green-100 text-green-800' : ''}
+                                  ${order.status === OrderStatus.Cancelled ? 'bg-red-100 text-red-800' : ''}
+                                `}>
+                                  {order.status}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => openUpdateStatusModal(order)}
+                                >
+                                  Update Status
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+            
+            {/* Products Tab */}
+            <TabsContent value="products">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Products Management</CardTitle>
+                    <CardDescription>
+                      Add, edit, or remove products from your catalog
+                    </CardDescription>
+                  </div>
+                  <Button onClick={() => setIsAddProductOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Product
                   </Button>
-                  <Button
-                    variant={orderFilter === "pending" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setOrderFilter("pending")}
-                  >
-                    Pending
-                  </Button>
-                  <Button
-                    variant={orderFilter === "in-progress" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setOrderFilter("in-progress")}
-                  >
-                    In Progress
-                  </Button>
-                  <Button
-                    variant={orderFilter === "delivered" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setOrderFilter("delivered")}
-                  >
-                    Delivered
-                  </Button>
-                </div>
-                
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500 h-4 w-4" />
+                </CardHeader>
+                <CardContent>
+                  {isProductsLoading ? (
+                    <div className="flex justify-center p-4">
+                      <div className="loader">Loading...</div>
+                    </div>
+                  ) : products.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-muted-foreground">No products found. Add your first product.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead>Price</TableHead>
+                            <TableHead>Unit</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {products.map((product: Product) => (
+                            <TableRow key={product.id}>
+                              <TableCell className="font-medium">{product.name}</TableCell>
+                              <TableCell>{product.category}</TableCell>
+                              <TableCell>{formatPrice(product.price)}</TableCell>
+                              <TableCell>{product.unit}</TableCell>
+                              <TableCell className="text-right space-x-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="icon"
+                                  onClick={() => openEditProductModal(product)}
+                                >
+                                  <PencilIcon className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="icon"
+                                  onClick={() => openDeleteProductModal(product)}
+                                >
+                                  <Trash2Icon className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Add Product Modal */}
+      <Dialog open={isAddProductOpen} onOpenChange={setIsAddProductOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add New Product</DialogTitle>
+            <DialogDescription>
+              Fill in the details to add a new product to your catalog
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={addProductForm.handleSubmit(handleAddProduct)}>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="name" className="text-right">
+                  Name
+                </Label>
+                <Input
+                  id="name"
+                  className="col-span-3"
+                  {...addProductForm.register("name")}
+                />
+                {addProductForm.formState.errors.name && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {addProductForm.formState.errors.name.message}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="category" className="text-right">
+                  Category
+                </Label>
+                <Select 
+                  onValueChange={(value) => addProductForm.setValue("category", value)}
+                  defaultValue={addProductForm.getValues("category")}
+                >
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ProductCategory.Vegetables}>Vegetables</SelectItem>
+                    <SelectItem value={ProductCategory.Fruits}>Fruits</SelectItem>
+                    <SelectItem value={ProductCategory.LeafyGreens}>Leafy Greens</SelectItem>
+                    <SelectItem value={ProductCategory.RootVegetables}>Root Vegetables</SelectItem>
+                    <SelectItem value={ProductCategory.ExoticVegetables}>Exotic Vegetables</SelectItem>
+                    <SelectItem value={ProductCategory.ExoticFruits}>Exotic Fruits</SelectItem>
+                    <SelectItem value={ProductCategory.Herbs}>Herbs</SelectItem>
+                  </SelectContent>
+                </Select>
+                {addProductForm.formState.errors.category && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {addProductForm.formState.errors.category.message}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="price" className="text-right">
+                  Price
+                </Label>
+                <div className="col-span-3 flex items-center gap-2">
                   <Input
-                    type="text"
-                    className="pl-10 pr-3 py-2 border border-neutral-300 rounded-md focus:ring-primary focus:border-primary"
-                    placeholder="Search orders..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    id="price"
+                    type="number"
+                    className="flex-1"
+                    min="0"
+                    step="0.01"
+                    {...addProductForm.register("price")}
+                  />
+                  <Label htmlFor="unit" className="whitespace-nowrap">
+                    Unit
+                  </Label>
+                  <Input
+                    id="unit"
+                    className="w-24"
+                    placeholder="kg, bunch"
+                    {...addProductForm.register("unit")}
                   />
                 </div>
+                {(addProductForm.formState.errors.price || addProductForm.formState.errors.unit) && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {addProductForm.formState.errors.price?.message || addProductForm.formState.errors.unit?.message}
+                  </p>
+                )}
               </div>
-              
-              {/* Orders Table */}
-              <div className="border border-neutral-200 rounded-md overflow-x-auto">
-                <Table>
-                  <TableHeader className="bg-neutral-50">
-                    <TableRow>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Order ID</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Customer</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Items</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Total</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Date</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Status</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="bg-white divide-y divide-neutral-200">
-                    {isLoadingOrders ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8">
-                          <div className="flex justify-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                          </div>
-                          <p className="mt-2 text-sm text-neutral-500">Loading orders...</p>
-                        </TableCell>
-                      </TableRow>
-                    ) : filteredOrders.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8">
-                          <p className="text-neutral-500">No orders found</p>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredOrders.map((order) => (
-                        <TableRow key={order.id}>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="text-sm font-medium text-neutral-800">{order.orderNumber}</div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="text-sm font-medium text-neutral-800">{order.customerName}</div>
-                            <div className="text-sm text-neutral-500">{order.customerPhone}</div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="text-sm text-neutral-600">
-                              {(order.items as any[]).length} items
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="text-sm font-medium text-neutral-800">₹{order.totalAmount.toString()}</div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="text-sm text-neutral-600">{formatDate(order.createdAt)}</div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <OrderStatusBadge status={order.status as any} size="sm" />
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-right">
-                            <div className="flex space-x-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-primary hover:text-primary-dark"
-                                onClick={() => handleViewOrder(order)}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-secondary hover:text-secondary-dark"
-                                onClick={() => handleUpdateOrderStatus(order)}
-                                disabled={order.status === "Delivered"}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="description" className="text-right">
+                  Description
+                </Label>
+                <Textarea
+                  id="description"
+                  className="col-span-3"
+                  {...addProductForm.register("description")}
+                />
+                {addProductForm.formState.errors.description && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {addProductForm.formState.errors.description.message}
+                  </p>
+                )}
               </div>
-              
-              <div className="mt-4 flex justify-between items-center">
-                <div className="text-sm text-neutral-600">
-                  {filteredOrders.length > 0 ? (
-                    <>
-                      Showing <span className="font-medium">1</span> to{" "}
-                      <span className="font-medium">{filteredOrders.length}</span> of{" "}
-                      <span className="font-medium">{orders.length}</span> orders
-                    </>
-                  ) : (
-                    "No orders found"
-                  )}
-                </div>
-                {orders.length > 10 && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled>Previous</Button>
-                    <Button variant="outline" size="sm">Next</Button>
-                  </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="imageUrl" className="text-right">
+                  Image URL
+                </Label>
+                <Input
+                  id="imageUrl"
+                  className="col-span-3"
+                  {...addProductForm.register("imageUrl")}
+                />
+                {addProductForm.formState.errors.imageUrl && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {addProductForm.formState.errors.imageUrl.message}
+                  </p>
                 )}
               </div>
             </div>
-          )}
-          
-          {/* Products Tab */}
-          {activeTab === "products" && (
-            <div>
-              <div className="flex justify-between mb-6">
-                <h2 className="text-xl font-heading font-semibold text-neutral-800">Product Inventory</h2>
-                <Button 
-                  className="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-md flex items-center"
-                  onClick={() => setShowAddProductModal(true)}
-                >
-                  <Plus className="h-4 w-4 mr-1" /> Add Product
-                </Button>
-              </div>
-              
-              {/* Products Table */}
-              <div className="border border-neutral-200 rounded-md overflow-x-auto">
-                <Table>
-                  <TableHeader className="bg-neutral-50">
-                    <TableRow>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Product</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Category</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Price</TableHead>
-                      <TableHead className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="bg-white divide-y divide-neutral-200">
-                    {isLoadingProducts ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center py-8">
-                          <div className="flex justify-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                          </div>
-                          <p className="mt-2 text-sm text-neutral-500">Loading products...</p>
-                        </TableCell>
-                      </TableRow>
-                    ) : products.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center py-8">
-                          <p className="text-neutral-500">No products found</p>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      products.map((product) => (
-                        <TableRow key={product.id}>
-                          <TableCell>
-                            <div className="flex items-center">
-                              <div className="h-10 w-10 flex-shrink-0">
-                                <img
-                                  className="h-10 w-10 rounded-md object-cover"
-                                  src={product.imageUrl || "https://via.placeholder.com/40?text=No+Image"}
-                                  alt={product.name}
-                                />
-                              </div>
-                              <div className="ml-4">
-                                <div className="text-sm font-medium text-neutral-800">{product.name}</div>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm text-neutral-600">{product.category}</div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm font-medium text-neutral-800">₹{product.price}/{product.unit}</div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex space-x-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-secondary hover:text-secondary-dark"
-                                onClick={() => handleEditProduct(product)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-500 hover:text-red-700"
-                                onClick={() => handleDeleteProduct(product)}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-          
-          {/* Analytics Tab (Placeholder) */}
-          {activeTab === "analytics" && (
-            <div className="text-center py-12">
-              <BarChart3 className="mx-auto h-12 w-12 text-neutral-400 mb-4" />
-              <h3 className="text-xl font-semibold text-neutral-700">Analytics Coming Soon</h3>
-              <p className="text-neutral-500 mt-2 max-w-md mx-auto">
-                Sales and inventory analytics will be available in a future update.
-              </p>
-            </div>
-          )}
-          
-          {/* Settings Tab (Placeholder) */}
-          {activeTab === "settings" && (
-            <div className="text-center py-12">
-              <Settings className="mx-auto h-12 w-12 text-neutral-400 mb-4" />
-              <h3 className="text-xl font-semibold text-neutral-700">Settings Coming Soon</h3>
-              <p className="text-neutral-500 mt-2 max-w-md mx-auto">
-                Account and application settings will be available in a future update.
-              </p>
-            </div>
-          )}
-        </Card>
-      </div>
-      
-      {/* Modals */}
-      <UpdateOrderStatusModal
-        open={showUpdateStatusModal}
-        onOpenChange={setShowUpdateStatusModal}
-        order={selectedOrder}
-      />
-      
-      <AddProductModal
-        open={showAddProductModal}
-        onOpenChange={setShowAddProductModal}
-      />
-      
-      <EditProductModal
-        open={showEditProductModal}
-        onOpenChange={setShowEditProductModal}
-        product={selectedProduct}
-      />
-      
-      <DeleteProductDialog
-        open={showDeleteProductDialog}
-        onOpenChange={setShowDeleteProductDialog}
-        product={selectedProduct}
-      />
-    </section>
-  );
-};
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsAddProductOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={addProductMutation.isPending}>
+                {addProductMutation.isPending ? "Adding..." : "Add Product"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-export default AdminDashboard;
+      {/* Edit Product Modal */}
+      <Dialog open={isEditProductOpen} onOpenChange={setIsEditProductOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Product</DialogTitle>
+            <DialogDescription>
+              Update product details
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={editProductForm.handleSubmit(handleEditProduct)}>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-name" className="text-right">
+                  Name
+                </Label>
+                <Input
+                  id="edit-name"
+                  className="col-span-3"
+                  {...editProductForm.register("name")}
+                />
+                {editProductForm.formState.errors.name && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {editProductForm.formState.errors.name.message}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-category" className="text-right">
+                  Category
+                </Label>
+                <Select 
+                  onValueChange={(value) => editProductForm.setValue("category", value)}
+                  defaultValue={editProductForm.getValues("category")}
+                >
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ProductCategory.Vegetables}>Vegetables</SelectItem>
+                    <SelectItem value={ProductCategory.Fruits}>Fruits</SelectItem>
+                    <SelectItem value={ProductCategory.LeafyGreens}>Leafy Greens</SelectItem>
+                    <SelectItem value={ProductCategory.RootVegetables}>Root Vegetables</SelectItem>
+                    <SelectItem value={ProductCategory.ExoticVegetables}>Exotic Vegetables</SelectItem>
+                    <SelectItem value={ProductCategory.ExoticFruits}>Exotic Fruits</SelectItem>
+                    <SelectItem value={ProductCategory.Herbs}>Herbs</SelectItem>
+                  </SelectContent>
+                </Select>
+                {editProductForm.formState.errors.category && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {editProductForm.formState.errors.category.message}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-price" className="text-right">
+                  Price
+                </Label>
+                <div className="col-span-3 flex items-center gap-2">
+                  <Input
+                    id="edit-price"
+                    type="number"
+                    className="flex-1"
+                    min="0"
+                    step="0.01"
+                    {...editProductForm.register("price")}
+                  />
+                  <Label htmlFor="edit-unit" className="whitespace-nowrap">
+                    Unit
+                  </Label>
+                  <Input
+                    id="edit-unit"
+                    className="w-24"
+                    placeholder="kg, bunch"
+                    {...editProductForm.register("unit")}
+                  />
+                </div>
+                {(editProductForm.formState.errors.price || editProductForm.formState.errors.unit) && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {editProductForm.formState.errors.price?.message || editProductForm.formState.errors.unit?.message}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-description" className="text-right">
+                  Description
+                </Label>
+                <Textarea
+                  id="edit-description"
+                  className="col-span-3"
+                  {...editProductForm.register("description")}
+                />
+                {editProductForm.formState.errors.description && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {editProductForm.formState.errors.description.message}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-imageUrl" className="text-right">
+                  Image URL
+                </Label>
+                <Input
+                  id="edit-imageUrl"
+                  className="col-span-3"
+                  {...editProductForm.register("imageUrl")}
+                />
+                {editProductForm.formState.errors.imageUrl && (
+                  <p className="text-red-500 text-sm col-span-3 col-start-2">
+                    {editProductForm.formState.errors.imageUrl.message}
+                  </p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditProductOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={updateProductMutation.isPending}>
+                {updateProductMutation.isPending ? "Updating..." : "Update Product"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Product Confirmation Dialog */}
+      <Dialog open={isDeleteProductOpen} onOpenChange={setIsDeleteProductOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete {selectedProduct?.name}? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteProductOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteProduct}
+              disabled={deleteProductMutation.isPending}
+            >
+              {deleteProductMutation.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Update Order Status Dialog */}
+      <Dialog open={isUpdateStatusOpen} onOpenChange={setIsUpdateStatusOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Update Order Status</DialogTitle>
+            <DialogDescription>
+              Change the status for order #{selectedOrder ? formatOrderNumber(selectedOrder.orderNumber) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="status" className="block mb-2">New Status</Label>
+            <Select 
+              onValueChange={(value) => handleUpdateOrderStatus(value as OrderStatusType)}
+              defaultValue={selectedOrder?.status}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select new status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={OrderStatus.Pending}>Pending</SelectItem>
+                <SelectItem value={OrderStatus.Processing}>Processing</SelectItem>
+                <SelectItem value={OrderStatus.Shipped}>Shipped</SelectItem>
+                <SelectItem value={OrderStatus.Delivered}>Delivered</SelectItem>
+                <SelectItem value={OrderStatus.Cancelled}>Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsUpdateStatusOpen(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
