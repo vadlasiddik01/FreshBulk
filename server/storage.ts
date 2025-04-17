@@ -6,12 +6,23 @@ import {
   OrderItem, 
   OrderStatus,
   Address,
-  InsertAddress
+  InsertAddress,
+  User,
+  InsertUser
 } from "@shared/schema";
 
 // modify the interface with any CRUD methods
 // you might need
 export interface IStorage {
+  // User methods
+  getAllUsers(): Promise<User[]>;
+  getUser(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
+  deleteUser(id: number): Promise<boolean>;
+  
   // Product methods
   getAllProducts(): Promise<Product[]>;
   getProductById(id: number): Promise<Product | undefined>;
@@ -37,18 +48,22 @@ export interface IStorage {
 }
 
 export class MemStorage implements IStorage {
+  private users: Map<number, User>;
   private products: Map<number, Product>;
   private orders: Map<number, Order>;
   private addresses: Map<number, Address>;
+  private currentUserId: number;
   private currentProductId: number;
   private currentOrderId: number;
   private currentAddressId: number;
   private orderNumberPrefix: string;
 
   constructor() {
+    this.users = new Map();
     this.products = new Map();
     this.orders = new Map();
     this.addresses = new Map();
+    this.currentUserId = 1;
     this.currentProductId = 1;
     this.currentOrderId = 1;
     this.currentAddressId = 1;
@@ -56,6 +71,21 @@ export class MemStorage implements IStorage {
     
     // Initialize with sample products
     this.seedProducts();
+    // Create an admin user
+    this.seedAdminUser();
+  }
+  
+  // Create an admin user
+  private seedAdminUser() {
+    const adminExists = Array.from(this.users.values()).some(user => user.role === 'admin');
+    if (!adminExists) {
+      this.createUser({
+        username: "admin",
+        password: "admin123", // In a real app, this would be hashed
+        email: "admin@example.com",
+        role: "admin"
+      });
+    }
   }
 
   // Seed with initial products
@@ -268,6 +298,54 @@ export class MemStorage implements IStorage {
     });
     
     return true;
+  }
+  
+  // User methods
+  async getAllUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  async getUser(id: number): Promise<User | undefined> {
+    return this.users.get(id);
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.username.toLowerCase() === username.toLowerCase()
+    );
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.email.toLowerCase() === email.toLowerCase()
+    );
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const id = this.currentUserId++;
+    const createdAt = new Date();
+
+    const newUser: User = {
+      ...user,
+      id,
+      createdAt,
+    };
+
+    this.users.set(id, newUser);
+    return newUser;
+  }
+
+  async updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined> {
+    const existingUser = this.users.get(id);
+    if (!existingUser) return undefined;
+
+    const updatedUser = { ...existingUser, ...user };
+    this.users.set(id, updatedUser);
+    return updatedUser;
+  }
+
+  async deleteUser(id: number): Promise<boolean> {
+    return this.users.delete(id);
   }
 }
 
