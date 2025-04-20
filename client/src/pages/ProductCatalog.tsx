@@ -16,7 +16,14 @@ const ProductCatalog = () => {
   const { toast } = useToast();
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
+    queryKey: ["products"],
+    queryFn: async () => {
+      const response = await fetch("/api/products");
+      if (!response.ok) {
+        throw new Error("Failed to fetch products");
+      }
+      return response.json();
+    },
   });
 
   // Apply filters and sorting

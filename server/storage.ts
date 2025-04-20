@@ -1,363 +1,176 @@
-import { 
-  Product, 
-  InsertProduct, 
-  Order, 
-  InsertOrder, 
-  OrderItem, 
-  OrderStatus,
-  Address,
-  InsertAddress,
-  User,
-  InsertUser
-} from "@shared/schema";
+import { drizzle } from 'drizzle-orm/neon-http';
+import { neon } from '@neondatabase/serverless';
+import {
+  users, products, orders, addresses,
+  InsertUser, InsertProduct, InsertOrder, InsertAddress
+} from '../shared/schema';
+import { eq, and } from 'drizzle-orm';
+import dotenv from 'dotenv';
+dotenv.config();
 
-// modify the interface with any CRUD methods
-// you might need
-export interface IStorage {
-  // User methods
-  getAllUsers(): Promise<User[]>;
-  getUser(id: number): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  getUserByEmail(email: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-  updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
-  deleteUser(id: number): Promise<boolean>;
-  
-  // Product methods
-  getAllProducts(): Promise<Product[]>;
-  getProductById(id: number): Promise<Product | undefined>;
-  createProduct(product: InsertProduct): Promise<Product>;
-  updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
-  deleteProduct(id: number): Promise<boolean>;
-  
-  // Order methods
-  getAllOrders(): Promise<Order[]>;
-  getOrderById(id: number): Promise<Order | undefined>;
-  getOrderByOrderNumber(orderNumber: string): Promise<Order | undefined>;
-  createOrder(order: InsertOrder): Promise<Order>;
-  updateOrderStatus(orderId: number, status: string): Promise<Order | undefined>;
-  
-  // Address methods
-  getAllAddresses(): Promise<Address[]>;
-  getAddressById(id: number): Promise<Address | undefined>;
-  getAddressesByEmail(email: string): Promise<Address[]>;
-  createAddress(address: InsertAddress): Promise<Address>;
-  updateAddress(id: number, address: Partial<InsertAddress>): Promise<Address | undefined>;
-  deleteAddress(id: number): Promise<boolean>;
-  setDefaultAddress(id: number): Promise<boolean>;
-}
+const sql = neon(process.env.DATABASE_URL!);
+export const db = drizzle(sql);
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private products: Map<number, Product>;
-  private orders: Map<number, Order>;
-  private addresses: Map<number, Address>;
-  private currentUserId: number;
-  private currentProductId: number;
-  private currentOrderId: number;
-  private currentAddressId: number;
-  private orderNumberPrefix: string;
+export class PostgresStorage {
+  // ------------------- Users -------------------
 
-  constructor() {
-    this.users = new Map();
-    this.products = new Map();
-    this.orders = new Map();
-    this.addresses = new Map();
-    this.currentUserId = 1;
-    this.currentProductId = 1;
-    this.currentOrderId = 1;
-    this.currentAddressId = 1;
-    this.orderNumberPrefix = "FBO-";
-    
-    // Initialize with sample products
-    this.seedProducts();
-    // Create an admin user
-    this.seedAdminUser();
-  }
-  
-  // Create an admin user
-  private seedAdminUser() {
-    const adminExists = Array.from(this.users.values()).some(user => user.role === 'admin');
-    if (!adminExists) {
-      // Pre-hashed version of "admin123" using our hash function
-      // In a production environment, this would be created dynamically, but for demo purposes
-      // we're using a pre-computed hash to ensure the admin user is available with known credentials
-      const hashedPassword = "b9fb18148fce1937bdf71685979e939b6d65dac59f1300e549f73e116a720c59f50d8c111972382644893b222ca0bd9b556fe7af3d1921fd2f6e153c725fe89e.5035b33cacb64ed17674a229e36e245d";
-      
-      console.log("Creating admin user with username: admin");
-      
-      this.users.set(this.currentUserId, {
-        id: this.currentUserId,
-        username: "admin",
-        password: hashedPassword,
-        email: "admin@example.com",
-        role: "admin",
-        createdAt: new Date()
-      });
-      
-      this.currentUserId++;
-    }
+  async getAllUsers() {
+    return await db.select().from(users);
   }
 
-  // Seed with initial products
-  private seedProducts() {
-    const initialProducts: InsertProduct[] = [
-      {
-        name: "Tomatoes",
-        category: "Vegetables",
-        price: "25",
-        unit: "kg",
-        description: "Fresh, ripe tomatoes perfect for sauces and salads.",
-        imageUrl: "https://images.unsplash.com/photo-1592924357229-86f5e9152a9e?ixlib=rb-1.2.1&auto=format&fit=crop&w=300&h=200&q=80"
-      },
-      {
-        name: "Apples",
-        category: "Fruits",
-        price: "120",
-        unit: "kg",
-        description: "Sweet and crunchy apples, perfect for snacking or baking.",
-        imageUrl: "https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?ixlib=rb-1.2.1&auto=format&fit=crop&w=300&h=200&q=80"
-      },
-      {
-        name: "Spinach",
-        category: "Leafy Greens",
-        price: "40",
-        unit: "bunch",
-        description: "Nutrient-rich spinach leaves for salads and cooking.",
-        imageUrl: "https://images.unsplash.com/photo-1576045057995-568f588f82fb?ixlib=rb-1.2.1&auto=format&fit=crop&w=300&h=200&q=80"
-      },
-      {
-        name: "Onions",
-        category: "Vegetables",
-        price: "30",
-        unit: "kg",
-        description: "Essential kitchen staple for adding flavor to any dish.",
-        imageUrl: "https://images.unsplash.com/photo-1618512496248-a07fe83aa8a0?ixlib=rb-1.2.1&auto=format&fit=crop&w=300&h=200&q=80"
-      }
-    ];
-
-    initialProducts.forEach(product => this.createProduct(product));
+  async getUser(id: number) {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
   }
 
-  // Generate a unique order number
-  private generateOrderNumber(): string {
-    const num = String(10000 + this.currentOrderId).substring(1);
-    return `${this.orderNumberPrefix}${num}`;
+  async getUserByUsername(username: string) {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
   }
 
-  // Product methods
-  async getAllProducts(): Promise<Product[]> {
-    return Array.from(this.products.values());
+  async getUserByEmail(email: string) {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
   }
 
-  async getProductById(id: number): Promise<Product | undefined> {
-    return this.products.get(id);
+  async createUser(data: InsertUser) {
+    const [user] = await db.insert(users).values(data).returning();
+    return user;
   }
 
-  async createProduct(product: InsertProduct): Promise<Product> {
-    const id = this.currentProductId++;
-    const newProduct: Product = { ...product, id };
-    this.products.set(id, newProduct);
-    return newProduct;
+  async updateUser(id: number, data: Partial<InsertUser>) {
+    const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return user;
   }
 
-  async updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined> {
-    const existingProduct = this.products.get(id);
-    if (!existingProduct) return undefined;
-
-    const updatedProduct = { ...existingProduct, ...product };
-    this.products.set(id, updatedProduct);
-    return updatedProduct;
+  async deleteUser(id: number) {
+    const [user] = await db.delete(users).where(eq(users.id, id)).returning();
+    return user;
   }
 
-  async deleteProduct(id: number): Promise<boolean> {
-    return this.products.delete(id);
+  // ------------------- Products -------------------
+
+  async getAllProducts() {
+    return await db.select().from(products);
   }
 
-  // Order methods
-  async getAllOrders(): Promise<Order[]> {
-    return Array.from(this.orders.values());
+  async getProductById(id: number) {
+    const [product] = await db.select().from(products).where(eq(products.id, id));
+    return product;
   }
 
-  async getOrderById(id: number): Promise<Order | undefined> {
-    return this.orders.get(id);
+  async createProduct(data: InsertProduct) {
+    const [product] = await db.insert(products).values(data).returning();
+    return product;
   }
 
-  async getOrderByOrderNumber(orderNumber: string): Promise<Order | undefined> {
-    return Array.from(this.orders.values()).find(
-      (order) => order.orderNumber === orderNumber
-    );
+  async updateProduct(id: number, data: Partial<InsertProduct>) {
+    const [product] = await db.update(products).set(data).where(eq(products.id, id)).returning();
+    return product;
   }
 
-  async createOrder(order: InsertOrder): Promise<Order> {
-    const id = this.currentOrderId++;
-    const orderNumber = this.generateOrderNumber();
-    const createdAt = new Date();
-
-    const newOrder: Order = { 
-      ...order, 
-      id, 
-      orderNumber,
-      createdAt, 
-      status: order.status || OrderStatus.Pending 
-    };
-    
-    this.orders.set(id, newOrder);
-    return newOrder;
+  async deleteProduct(id: number) {
+    const [product] = await db.delete(products).where(eq(products.id, id)).returning();
+    return product;
   }
 
-  async updateOrderStatus(orderId: number, status: string): Promise<Order | undefined> {
-    const order = this.orders.get(orderId);
-    if (!order) return undefined;
+  // ------------------- Orders -------------------
 
-    const updatedOrder = { ...order, status };
-    this.orders.set(orderId, updatedOrder);
-    return updatedOrder;
-  }
-  
-  // Address methods
-  async getAllAddresses(): Promise<Address[]> {
-    return Array.from(this.addresses.values());
+  async getAllOrders() {
+    return await db.select().from(orders);
   }
 
-  async getAddressById(id: number): Promise<Address | undefined> {
-    return this.addresses.get(id);
+  async getOrderById(id: number) {
+    const [order] = await db.select().from(orders).where(eq(orders.id, id));
+    return order;
   }
 
-  async getAddressesByEmail(email: string): Promise<Address[]> {
-    return Array.from(this.addresses.values()).filter(
-      (address) => address.customerEmail.toLowerCase() === email.toLowerCase()
-    );
+  async getOrderByOrderNumber(orderNumber: string) {
+    const [order] = await db.select().from(orders).where(eq(orders.orderNumber, orderNumber));
+    return order;
   }
 
-  async createAddress(address: InsertAddress): Promise<Address> {
-    const id = this.currentAddressId++;
-    const createdAt = new Date();
-    
-    // If this is the first address or marked as default, ensure it's set as default
-    const isDefault = address.isDefault || this.addresses.size === 0;
-    
-    // If this will be the default, remove default status from other addresses
-    if (isDefault) {
-      Array.from(this.addresses.entries()).forEach(([addressId, existingAddress]) => {
-        if (existingAddress.customerEmail === address.customerEmail) {
-          const updated = { ...existingAddress, isDefault: false };
-          this.addresses.set(addressId, updated);
-        }
-      });
-    }
-
-    const newAddress: Address = {
-      ...address,
-      id,
-      createdAt,
-      isDefault
-    };
-    
-    this.addresses.set(id, newAddress);
-    return newAddress;
+  async getOrdersByEmail(email: string) {
+    return await db.select().from(orders).where(eq(orders.customerEmail, email));
   }
 
-  async updateAddress(id: number, address: Partial<InsertAddress>): Promise<Address | undefined> {
-    const existingAddress = this.addresses.get(id);
-    if (!existingAddress) return undefined;
-
-    // Handle default address logic
-    if (address.isDefault) {
-      Array.from(this.addresses.entries()).forEach(([addressId, addr]) => {
-        if (addressId !== id && addr.customerEmail === existingAddress.customerEmail) {
-          const updated = { ...addr, isDefault: false };
-          this.addresses.set(addressId, updated);
-        }
-      });
-    }
-
-    const updatedAddress = { ...existingAddress, ...address };
-    this.addresses.set(id, updatedAddress);
-    return updatedAddress;
+  async createOrder(data: InsertOrder) {
+    const orderNumber = `ORD-${Date.now()}`;
+    const [order] = await db
+      .insert(orders)
+      .values({ ...data, orderNumber })
+      .returning();
+    return order;
   }
 
-  async deleteAddress(id: number): Promise<boolean> {
-    const address = this.addresses.get(id);
-    if (!address) return false;
-    
-    // If deleting a default address, set the next available one as default
-    if (address.isDefault) {
-      const otherAddresses = Array.from(this.addresses.values()).filter(
-        addr => addr.id !== id && addr.customerEmail === address.customerEmail
-      );
-      
-      if (otherAddresses.length > 0) {
-        const newDefaultId = otherAddresses[0].id;
-        await this.setDefaultAddress(newDefaultId);
-      }
-    }
-    
-    return this.addresses.delete(id);
+  async updateOrderStatus(orderNumber: string, status: string) {
+    const [order] = await db
+      .update(orders)
+      .set({ status })
+      .where(eq(orders.orderNumber, orderNumber))
+      .returning();
+    return order;
   }
 
-  async setDefaultAddress(id: number): Promise<boolean> {
-    const address = this.addresses.get(id);
-    if (!address) return false;
-    
-    // Set all other addresses from this user to non-default
-    Array.from(this.addresses.entries()).forEach(([addressId, addr]) => {
-      if (addr.customerEmail === address.customerEmail) {
-        const updated = { ...addr, isDefault: addressId === id };
-        this.addresses.set(addressId, updated);
-      }
-    });
-    
-    return true;
-  }
-  
-  // User methods
-  async getAllUsers(): Promise<User[]> {
-    return Array.from(this.users.values());
+  // ------------------- Addresses -------------------
+
+  async getAllAddresses() {
+    return await db.select().from(addresses);
   }
 
-  async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+  async getAddressById(id: number) {
+    const [address] = await db.select().from(addresses).where(eq(addresses.id, id));
+    return address;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username.toLowerCase() === username.toLowerCase()
-    );
+  async getAddressesByEmail(email: string) {
+    return await db.select().from(addresses).where(eq(addresses.customerEmail, email));
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.email.toLowerCase() === email.toLowerCase()
-    );
+  async getDefaultAddress(email: string) {
+    const [address] = await db
+      .select()
+      .from(addresses)
+      .where(and(
+        eq(addresses.customerEmail, email),
+        eq(addresses.isDefault, true)
+      ));
+    return address;
   }
 
-  async createUser(user: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const createdAt = new Date();
-
-    const newUser: User = {
-      ...user,
-      id,
-      createdAt,
-    };
-
-    this.users.set(id, newUser);
-    return newUser;
+  async createAddress(data: InsertAddress) {
+    const [address] = await db.insert(addresses).values(data).returning();
+    return address;
   }
 
-  async updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined> {
-    const existingUser = this.users.get(id);
-    if (!existingUser) return undefined;
-
-    const updatedUser = { ...existingUser, ...user };
-    this.users.set(id, updatedUser);
-    return updatedUser;
+  async updateAddress(id: number, data: Partial<InsertAddress>) {
+    const [address] = await db.update(addresses).set(data).where(eq(addresses.id, id)).returning();
+    return address;
   }
 
-  async deleteUser(id: number): Promise<boolean> {
-    return this.users.delete(id);
+  async deleteAddress(id: number) {
+    const [address] = await db.delete(addresses).where(eq(addresses.id, id)).returning();
+    return address;
+  }
+
+  async setDefaultAddress(addressId: number) {
+    // Get the target address first
+    const [target] = await db.select().from(addresses).where(eq(addresses.id, addressId));
+    if (!target) return null;
+
+    // Unset all default addresses for the user
+    await db.update(addresses)
+      .set({ isDefault: false })
+      .where(eq(addresses.customerEmail, target.customerEmail));
+
+    // Set the new default
+    const [updated] = await db.update(addresses)
+      .set({ isDefault: true })
+      .where(eq(addresses.id, addressId))
+      .returning();
+
+    return updated;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new PostgresStorage();

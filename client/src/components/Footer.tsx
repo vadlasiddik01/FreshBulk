@@ -25,10 +25,10 @@ const Footer = () => {
               </li>
               <li>
                 <Link 
-                  href="/place-order" 
+                  href="/cart" 
                   className="text-neutral-300 hover:text-white transition-colors"
                 >
-                  Place Order
+                  Cart
                 </Link>
               </li>
               <li>

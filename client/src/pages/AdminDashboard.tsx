@@ -262,12 +262,12 @@ export default function AdminDashboard() {
   const openEditProductModal = (product: Product) => {
     setSelectedProduct(product);
     editProductForm.reset({
-      name: product.name,
-      category: product.category,
-      price: product.price,
-      unit: product.unit,
-      description: product.description,
-      imageUrl: product.imageUrl,
+      name: product.name ?? "",
+      category: product.category ?? "",
+      price: product.price ?? "",
+      unit: product.unit ?? "",
+      description: product.description ?? "",
+      imageUrl: product.imageUrl ?? "",
     });
     setIsEditProductOpen(true);
   };

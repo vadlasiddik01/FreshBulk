@@ -20,7 +20,8 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-// Address model
+// Address modelnpm install drizzle-orm @neondatabase/serverless
+
 export const addresses = pgTable("addresses", {
   id: serial("id").primaryKey(),
   customerName: text("customer_name").notNull(),
@@ -70,7 +71,7 @@ export const orders = pgTable("orders", {
   deliveryCity: text("delivery_city").notNull(),
   deliveryPincode: text("delivery_pincode").notNull(),
   status: text("status").notNull().default("Pending"),
-  notes: text("notes").default(null),
+  notes: text("notes").default(""),
   totalAmount: numeric("total_amount").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   items: json("items").notNull(),
@@ -112,3 +113,6 @@ export const ProductCategory = {
 } as const;
 
 export type ProductCategoryType = typeof ProductCategory[keyof typeof ProductCategory];
+
+// Export all tables
+export * from './schema';

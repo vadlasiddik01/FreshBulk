@@ -33,7 +33,7 @@ const Navbar = () => {
 
   // Links that require authentication
   const authLinks = [
-    { path: "/place-order", label: "Place Order" },
+    { path: "/cart", label: "Cart" },
   ];
 
   // Admin-only links

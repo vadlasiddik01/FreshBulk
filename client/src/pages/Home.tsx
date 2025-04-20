@@ -29,8 +29,8 @@ const Home = () => {
                 <Button
                   size="lg"
                   variant="outline"
-                  className="border-white text-white hover:bg-white/10 text-lg px-8"
-                  onClick={() => navigate("/place-order")}
+                  className="border-white text-white bg-transparent hover:bg-white/10 text-lg px-8"
+                  onClick={() => navigate("/cart")}
                 >
                   Place Order
                 </Button>

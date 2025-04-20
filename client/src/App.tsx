@@ -7,13 +7,14 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Home from "@/pages/Home";
 import ProductCatalog from "@/pages/ProductCatalog";
-import PlaceOrder from "@/pages/PlaceOrder";
+import PlaceOrder from "@/pages/Cart";
 import TrackOrder from "@/pages/TrackOrder";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AuthPage from "@/pages/auth-page";
 import { AuthProvider } from "@/hooks/use-auth";
 import { ProtectedRoute } from "@/lib/protected-route";
-
+import { CartesianAxis } from "recharts";
+import { useForm } from "react-hook-form";
 function Router() {
   return (
     <Switch>
@@ -21,7 +22,7 @@ function Router() {
       <Route path="/products" component={ProductCatalog} />
       <Route path="/auth" component={AuthPage} />
       <Route path="/track-order" component={TrackOrder} />
-      <ProtectedRoute path="/place-order" component={PlaceOrder} />
+      <ProtectedRoute path="/cart" component={PlaceOrder} />
       <ProtectedRoute path="/admin" component={AdminDashboard} adminOnly />
       <Route component={NotFound} />
     </Switch>

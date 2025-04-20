@@ -16,6 +16,20 @@ import {
   sendOrderStatusUpdate 
 } from "./email";
 
+declare global {
+  namespace Express {
+    interface User {
+      email: string;
+      role: string;
+    }
+
+    interface Request {
+      user?: User;
+    }
+  }
+}
+
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Set up authentication
   setupAuth(app);
@@ -122,7 +136,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Check if user is admin or the order belongs to them
-    if (req.user.role !== 'admin' && req.user.email !== order.customerEmail) {
+    if (req.user!.role !== 'admin' && req.user!.email !== order.customerEmail) {
       return res.status(403).json({ message: "You don't have permission to view this order" });
     }
     
@@ -144,15 +158,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Anyone can place an order, authentication is optional
   app.post("/api/orders", async (req, res) => {
     try {
-      // Validate the items array separately
+      console.log('Received order data:', req.body);
+  
       const itemsSchema = z.array(orderItemSchema);
       const items = itemsSchema.parse(req.body.items);
+  
+      const calculatedTotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      // Ensure totalAmount is a string
+      const totalAmount = req.body.totalAmount ? String(req.body.totalAmount) : String(calculatedTotal);
       
-      // Process the order with validated items
-      const orderData = insertOrderSchema.parse(req.body);
-      const newOrder = await storage.createOrder(orderData);
-      
-      // Send order confirmation email
+      let deliveryAddress = "";
+      let deliveryCity = "";
+      let deliveryPincode = "";
+  
+      // ✅ If addressId is sent, use saved address
+      if (req.body.addressId) {
+        const savedAddress = await storage.getAddressById(req.body.addressId);
+        if (!savedAddress || (req.user && req.user.email !== savedAddress.customerEmail)) {
+          return res.status(403).json({ message: "Invalid address selected" });
+        }
+  
+        deliveryAddress = savedAddress.addressLine;
+        deliveryCity = savedAddress.city;
+        deliveryPincode = savedAddress.pincode;
+      } else {
+        // ✅ Otherwise use address fields from body
+        deliveryAddress = req.body.deliveryAddress;
+        deliveryCity = req.body.deliveryCity;
+        deliveryPincode = req.body.deliveryPincode;
+      }
+  
+      const orderData = {
+        customerName: req.body.customerName,
+        customerEmail: req.body.customerEmail,
+        customerPhone: req.body.customerPhone,
+        deliveryAddress,
+        deliveryCity,
+        deliveryPincode,
+        notes: req.body.notes ?? "",
+        totalAmount,
+        items,
+      };
+  
+      const validatedOrder = insertOrderSchema.parse(orderData);
+      const newOrder = await storage.createOrder(validatedOrder);
+  
       sendOrderConfirmation(newOrder)
         .then(sent => {
           if (sent) {
@@ -164,31 +214,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .catch(error => {
           console.error(`Error sending order confirmation email: ${error}`);
         });
-      
+  
       res.status(201).json(newOrder);
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Invalid order data", errors: error.errors });
+        console.log(error);
       } else {
         console.error("Order creation error:", error);
         res.status(500).json({ message: "Failed to create order" });
       }
     }
   });
+  
 
   // Only admin can update order status
-  app.patch("/api/orders/:id/status", isAdmin, async (req, res) => {
+  app.patch("/api/orders/:orderNumber/status", isAdmin, async (req, res) => {
     try {
-      const orderId = parseInt(req.params.id);
-      
-      if (isNaN(orderId)) {
-        return res.status(400).json({ message: "Invalid order ID" });
-      }
+      const orderNumber = req.params.orderNumber;
       
       const statusSchema = z.object({ status: z.string() });
       const { status } = statusSchema.parse(req.body);
       
-      const updatedOrder = await storage.updateOrderStatus(orderId, status);
+      const updatedOrder = await storage.updateOrderStatus(orderNumber, status);
       
       if (!updatedOrder) {
         return res.status(404).json({ message: "Order not found" });
@@ -223,7 +271,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     // If email is provided, ensure the user is either admin or requesting their own addresses
     if (email) {
-      if (req.user.role !== 'admin' && req.user.email !== email) {
+      if (req.user!.role !== 'admin' && req.user!.email !== email) {
         return res.status(403).json({ message: "You don't have permission to view these addresses" });
       }
       
@@ -232,7 +280,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Only admins can view all addresses
-    if (req.user.role !== 'admin') {
+    if (req.user!.role !== 'admin') {
       return res.status(403).json({ message: "Admin access required" });
     }
     
@@ -254,7 +302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Ensure the user is either admin or requesting their own address
-    if (req.user.role !== 'admin' && req.user.email !== address.customerEmail) {
+    if (req.user!.role !== 'admin' && req.user!.email !== address.customerEmail) {
       return res.status(403).json({ message: "You don't have permission to view this address" });
     }
     
@@ -266,7 +314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const addressData = insertAddressSchema.parse(req.body);
       
       // Ensure the user is either admin or creating their own address
-      if (req.user.role !== 'admin' && req.user.email !== addressData.customerEmail) {
+      if (req.user!.role !== 'admin' && req.user!.email !== addressData.customerEmail) {
         return res.status(403).json({ message: "You can only create addresses for your own account" });
       }
       
@@ -295,7 +343,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Ensure the user is either admin or updating their own address
-      if (req.user.role !== 'admin' && req.user.email !== address.customerEmail) {
+      if (req.user!.role !== 'admin' && req.user!.email !== address.customerEmail) {
         return res.status(403).json({ message: "You don't have permission to update this address" });
       }
       
@@ -325,7 +373,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Ensure the user is either admin or deleting their own address
-    if (req.user.role !== 'admin' && req.user.email !== address.customerEmail) {
+    if (req.user!.role !== 'admin' && req.user!.email !== address.customerEmail) {
       return res.status(403).json({ message: "You don't have permission to delete this address" });
     }
     
@@ -347,7 +395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Ensure the user is either admin or setting default for their own address
-    if (req.user.role !== 'admin' && req.user.email !== address.customerEmail) {
+    if (req.user!.role !== 'admin' && req.user!.email !== address.customerEmail) {
       return res.status(403).json({ message: "You don't have permission to modify this address" });
     }
     
@@ -358,5 +406,5 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
-  return httpServer;
+  return httpServer; 
 }

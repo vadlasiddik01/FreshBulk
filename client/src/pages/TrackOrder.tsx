@@ -57,8 +57,8 @@ const TrackOrder = () => {
   // Status timeline steps
   const statusSteps = [
     { status: OrderStatus.Pending, label: "Order Received", icon: <Check /> },
-    { status: OrderStatus.InProgress, label: "Processing Order", icon: <Package /> },
-    { status: OrderStatus.InProgress, label: "Out for Delivery", icon: <Truck /> },
+    { status: OrderStatus.Processing, label: "Processing Order", icon: <Package /> },
+    { status: OrderStatus.Shipped, label: "Out for Delivery", icon: <Truck /> },
     { status: OrderStatus.Delivered, label: "Delivered", icon: <Check /> },
   ];
 
@@ -71,7 +71,7 @@ const TrackOrder = () => {
       case OrderStatus.Pending:
         currentStep = 0;
         break;
-      case OrderStatus.InProgress:
+      case OrderStatus.Processing:
         currentStep = 2; // 1 and 2 are both part of "In Progress"
         break;
       case OrderStatus.Delivered:
@@ -160,7 +160,7 @@ const TrackOrder = () => {
                       textColor = "text-white";
                       contentColor = "text-neutral-800";
                     } else if (status === "current") {
-                      bgColor = step.status === OrderStatus.InProgress ? "bg-status-info" : "bg-status-success";
+                      bgColor = step.status === OrderStatus.Processing ? "bg-status-info" : "bg-status-success";
                       textColor = "text-white";
                       contentColor = "text-neutral-800";
                     }
