@@ -1,3 +1,6 @@
+![Demo GIF](https://github.com/vadlasiddik01/FreshBulk/blob/main/attached_assets/Screencastfrom20-04-25100231PMIST-ezgif.com-video-to-gif-converter.gif?raw=true)
+
+
 Admin login credentials:-
 username: admin
 password: admin123
